@@ -52,17 +52,16 @@ def init_db():
         conn.commit()
         cur.close()
         conn.close()
-        print("Database tables created/verified successfully")
+        print("✅ Database tables created/verified successfully")
     except Exception as e:
-        print(f"Database initialization error: {e}")
+        print(f"⚠️ Database initialization error: {e}")
         raise e
 
 # Call init_db when app starts
 try:
     init_db()
 except Exception as e:
-    print(f"Warning: Could not initialize database: {e}")
-    print("Make sure DATABASE_URL environment variable is set in Railway")
+    print(f"⚠️ Could not initialize database: {e}")
 
 # Configuration
 YOUR_PASSWORD = "brute@2007"
@@ -92,8 +91,10 @@ def init_license():
         cur.close()
         conn.close()
         
-        # PTC URL with redirect back to claim page
-        ptc_url = f"https://zerads.com/ptc.php?ref=11248&user={session_token}&redirect={FRONTEND_URL}/claim.html?token={session_token}"
+        # PTC URL without redirect (users will manually check)
+        ptc_url = f"https://zerads.com/ptc.php?ref=11248&user={session_token}"
+        
+        print(f"✅ Created session: {session_token} for user: {user_id}")
         
         return jsonify({
             'success': True,
@@ -101,20 +102,26 @@ def init_license():
             'ptc_url': ptc_url
         }), 200
     except Exception as e:
+        print(f"❌ Init license error: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ---------- 2. Zerads callback ----------
+# ---------- 2. Zerads callback (THIS WAS MISSING - FIXED) ----------
 @app.route('/zerads-callback', methods=['GET'])
 def zerads_callback():
+    print(f"🔔 Callback received! Args: {request.args}")
     try:
         pwd = request.args.get('pwd')
         session_token = request.args.get('user')
         clicks = int(request.args.get('clicks', 0))
         
+        print(f"Password: {pwd}, Token: {session_token}, Clicks: {clicks}")
+        
         if pwd != YOUR_PASSWORD:
+            print("❌ Invalid password")
             return "Invalid password", 403
         
         if not session_token or clicks == 0:
+            print("❌ Missing user or clicks")
             return "Missing user or clicks", 400
         
         conn = get_db_connection()
@@ -128,11 +135,13 @@ def zerads_callback():
         session = cur.fetchone()
         
         if not session:
+            print(f"❌ Session not found: {session_token}")
             cur.close()
             conn.close()
             return "Session not found", 404
         
         clicks_done, clicks_needed, status, license_key = session
+        print(f"Session found - Clicks done: {clicks_done}, Needed: {clicks_needed}, Status: {status}")
         
         if status == 'completed':
             cur.close()
@@ -145,6 +154,7 @@ def zerads_callback():
             "UPDATE pending_sessions SET clicks_done = %s WHERE session_token = %s",
             (new_clicks_done, session_token)
         )
+        print(f"Updated clicks to: {new_clicks_done}")
         
         # If completed, generate license
         if new_clicks_done >= clicks_needed and status != 'completed':
@@ -168,6 +178,7 @@ def zerads_callback():
                 "UPDATE pending_sessions SET status = 'completed', license_key = %s WHERE session_token = %s",
                 (new_license_key, session_token)
             )
+            print(f"✅ License generated: {new_license_key}")
         
         conn.commit()
         cur.close()
@@ -175,6 +186,7 @@ def zerads_callback():
         
         return "OK", 200
     except Exception as e:
+        print(f"❌ Callback error: {str(e)}")
         return f"Error: {str(e)}", 500
 
 # ---------- 3. Check session status ----------
@@ -281,7 +293,13 @@ def health():
 def root():
     return jsonify({
         'message': 'License API is running',
-        'endpoints': ['/init-license', '/verify-license', '/check-session', '/zerads-callback', '/health']
+        'endpoints': [
+            '/init-license', 
+            '/verify-license', 
+            '/check-session', 
+            '/zerads-callback', 
+            '/health'
+        ]
     }), 200
 
 if __name__ == '__main__':
