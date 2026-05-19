@@ -11,7 +11,7 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-# Database connection - FIXED VERSION
+# Database connection
 def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
@@ -67,6 +67,9 @@ except Exception as e:
 # Configuration
 YOUR_PASSWORD = "brute@2007"
 
+# Frontend URL (for redirect)
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://license-frontend.bruteexe2007.workers.dev')
+
 # ---------- 1. Initialize license (user clicks "Get License") ----------
 @app.route('/init-license', methods=['POST'])
 def init_license():
@@ -89,7 +92,8 @@ def init_license():
         cur.close()
         conn.close()
         
-        ptc_url = f"https://zerads.com/ptc.php?ref=11248&user={session_token}"
+        # PTC URL with redirect back to claim page
+        ptc_url = f"https://zerads.com/ptc.php?ref=11248&user={session_token}&redirect={FRONTEND_URL}/claim.html?token={session_token}"
         
         return jsonify({
             'success': True,
@@ -197,14 +201,6 @@ def check_session():
         status, license_key, clicks_done, clicks_needed = session
         
         if status == 'completed':
-            # Delete session after retrieval
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("DELETE FROM pending_sessions WHERE session_token = %s", (session_token,))
-            conn.commit()
-            cur.close()
-            conn.close()
-            
             return jsonify({
                 'status': 'completed',
                 'license_key': license_key
