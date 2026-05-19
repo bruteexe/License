@@ -11,50 +11,58 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-# Database connection (Railway will provide DATABASE_URL)
+# Database connection - FIXED VERSION
 def get_db_connection():
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
-        # Fallback for local testing
-        database_url = "postgresql://postgres:postgres@localhost:5432/license_db"
+        raise Exception("DATABASE_URL environment variable not set. Please add it in Railway Variables.")
     conn = psycopg2.connect(database_url)
     return conn
 
 # Initialize database tables
 def init_db():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    # Create licenses table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS licenses (
-            license_key TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            request_ip TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Create pending_sessions table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS pending_sessions (
-            session_token TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            ip_address TEXT NOT NULL,
-            clicks_needed INTEGER DEFAULT 5,
-            clicks_done INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'pending',
-            license_key TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Create licenses table
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS licenses (
+                license_key TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                request_ip TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create pending_sessions table
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS pending_sessions (
+                session_token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ip_address TEXT NOT NULL,
+                clicks_needed INTEGER DEFAULT 5,
+                clicks_done INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                license_key TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("Database tables created/verified successfully")
+    except Exception as e:
+        print(f"Database initialization error: {e}")
+        raise e
 
 # Call init_db when app starts
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"Warning: Could not initialize database: {e}")
+    print("Make sure DATABASE_URL environment variable is set in Railway")
 
 # Configuration
 YOUR_PASSWORD = "brute@2007"
@@ -189,6 +197,14 @@ def check_session():
         status, license_key, clicks_done, clicks_needed = session
         
         if status == 'completed':
+            # Delete session after retrieval
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM pending_sessions WHERE session_token = %s", (session_token,))
+            conn.commit()
+            cur.close()
+            conn.close()
+            
             return jsonify({
                 'status': 'completed',
                 'license_key': license_key
@@ -259,18 +275,19 @@ def verify_license():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Health check endpoint
+# ---------- Health check endpoint ----------
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'healthy'}), 200
 
-# Root endpoint
+# ---------- Root endpoint ----------
 @app.route('/', methods=['GET'])
 def root():
     return jsonify({
         'message': 'License API is running',
-        'endpoints': ['/init-license', '/verify-license', '/check-session', '/zerads-callback']
+        'endpoints': ['/init-license', '/verify-license', '/check-session', '/zerads-callback', '/health']
     }), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
